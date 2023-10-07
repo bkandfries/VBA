@@ -1,0 +1,50 @@
+
+Function ReplaceInvalidCharacters(s As String) As String
+    Dim invalidChars As Variant
+    Dim i As Integer
+    
+    invalidChars = Array("\", "/", "*", "[", "]", ":", "?")
+    
+    For i = LBound(invalidChars) To UBound(invalidChars)
+        s = Replace(s, invalidChars(i), "_")
+    Next i
+    
+    ReplaceInvalidCharacters = s
+End Function
+
+' Helper function to create a sheet
+Sub CreateSheet(wb As Workbook, shtName As String, rng As Range)
+    Dim parentName As String
+    Dim parentSht As Worksheet
+    Dim newSht As Worksheet
+    
+    parentName = rng.Find(shtName, LookIn:=xlValues, LookAt:=xlWhole).Offset(0, 1).Value
+    
+    If parentName <> "" And Not WorksheetExists(parentName) And IsInList(parentName, rng) Then
+        ' Recursive call to create the parent sheet first
+        CreateSheet wb, parentName, rng
+    End If
+    
+    If WorksheetExists(parentName) Then
+        ' If parent sheet exists, add new sheet after the parent
+        Set parentSht = wb.Sheets(parentName)
+        Set newSht = wb.Sheets.Add(After:=parentSht)
+        newSht.Name = shtName
+    Else
+        ' If parent sheet doesn't exist, add new sheet after the last sheet
+        Set newSht = wb.Sheets.Add(After:=wb.Sheets(wb.Sheets.Count))
+        newSht.Name = shtName
+    End If
+End Sub
+
+' Helper function to check if a value is in a list
+Function IsInList(value As Variant, rng As Range) As Boolean
+    Dim cell As Range
+    For Each cell In rng
+        If cell.Value = value Then
+            IsInList = True
+            Exit Function
+        End If
+    Next cell
+    IsInList = False
+End Function

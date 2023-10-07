@@ -1,0 +1,212 @@
+
+Option Explicit
+
+Function CreateNewWorksheets() As Collection
+    On Error GoTo ErrorHandler
+    
+    Dim wb As Workbook
+    Set wb = ActiveWorkbook  ' Set the active workbook to a variable
+    
+    Dim ws As Worksheet
+    Dim rng As Range
+    Dim i As Long
+    Dim shtName As String
+    Dim parentName As String
+    Dim lastRow As Long
+    Dim newSheetNames As New Collection
+
+    ' Target the sheet named "TabOrder" in the specified workbook
+    Set ws = wb.Sheets("TabOrder")
+    ' Find the last row of the list
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    ' Set the range of the list
+    Set rng = ws.Range("A2:A" & lastRow)
+
+    ' Loop through each row in the range, in reverse, starting from lastRow to 2
+    For i = lastRow To 2 Step -1
+        shtName = rng.Cells(i, 1).Value
+        parentName = rng.Cells(i, 1).Offset(0, 1).Value
+
+        ' Skip if sheet name is blank
+        If shtName = "" Then
+            GoTo NextIteration
+        End If
+        
+        ' Replace invalid characters and update source table if necessary
+        Dim correctedName As String
+        correctedName = ReplaceInvalidCharacters(shtName)
+        If correctedName <> shtName Then
+            rng.Cells(i, 1).Value = correctedName
+            shtName = correctedName
+        End If
+
+        ' Check if sheet already exists
+        If Not WorksheetExists(shtName) Then
+            ' If parent name is not blank and parent sheet doesn't exist, but is in the list to be created
+            If parentName <> "" And Not WorksheetExists(parentName) And IsInList(parentName, rng) Then
+                ' Recursive call to create the parent sheet first
+                CreateSheet wb, parentName, rng
+            End If
+            ' Now create the current sheet
+            CreateSheet wb, shtName, rng
+            ' Add newly created sheet name to the collection
+            newSheetNames.Add shtName
+        End If
+        
+NextIteration:
+    Next i
+
+    ' Return the collection of new sheet names
+    Set CreateNewWorksheets = newSheetNames
+    
+ExitFunction:
+    Exit Function
+
+ErrorHandler:
+    MsgBox "An error occurred in CreateNewWorksheets: " & Err.Description, vbExclamation
+    Resume ExitFunction
+End Function
+
+Sub CopyTemplateToNewSheets(wb As Workbook, newSheetNames As Collection)
+    On Error GoTo ErrorHandler
+    
+    Dim templateSht As Worksheet
+    Dim sht As Worksheet
+    Dim shtName As Variant
+    Dim col As Range
+    Dim hiddenCols As Collection
+
+    ' Set the template sheet using the specified workbook
+    Set templateSht = wb.Sheets("SUMMARY")
+
+    ' Loop through all new sheet names in the collection
+    For Each shtName In newSheetNames
+        ' Use wb instead of ActiveWorkbook
+        Set sht = wb.Sheets(shtName)
+        
+        ' Copy all cells from template sheet to target sheet
+        templateSht.Cells.Copy Destination:=sht.Cells
+        
+        ' 1. Set AutoFilter to match the template sheet
+        If Not templateSht.AutoFilter Is Nothing Then
+            Dim filterRange As Range
+            Set filterRange = templateSht.AutoFilter.Range
+            sht.Range(filterRange.Address).AutoFilter
+        End If
+        
+        ' 2. Column Visibility and Freeze Pane
+        ' Collect hidden columns
+        Set hiddenCols = New Collection
+        For Each col In sht.Columns
+            If col.Hidden Then hiddenCols.Add col.Column
+        Next col
+        ' Unhide all columns
+        sht.Columns.Hidden = False
+        ' Set Freeze Pane at cell C13
+        sht.Activate
+        With ActiveWindow
+            .SplitColumn = 2
+            .SplitRow = 12
+            .FreezePanes = True
+        End With
+        ' Re-hide previously hidden columns
+        Dim c As Variant
+        For Each c In hiddenCols
+            sht.Columns(c).Hidden = True
+        Next c
+        
+        ' 3. Set Window Zoom to 90%
+        sht.Activate
+        ActiveWindow.Zoom = 90
+        
+    Next shtName
+    
+    ' Reactivate the template sheet
+    templateSht.Activate
+    
+ExitSub:
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "An error occurred in CopyTemplateToNewSheets: " & Err.Description, vbExclamation
+    Resume ExitSub
+End Sub
+
+Sub CreateAndCopyTemplates()
+    On Error GoTo ErrorHandler
+    
+    Dim wb As Workbook
+    Set wb = ActiveWorkbook  ' Set the active workbook to a variable
+    
+    Dim newSheetNames As Collection
+    Set newSheetNames = CreateNewWorksheets()
+    
+    CopyTemplateToNewSheets wb, newSheetNames  ' Pass the workbook variable to the subroutine
+    
+ExitSub:
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "An error occurred in CreateAndCopyTemplates: " & Err.Description, vbExclamation
+    Resume ExitSub
+End Sub
+
+Function WorksheetExists(shtName As String, Optional wb As Workbook) As Boolean
+    Dim sht As Worksheet
+
+    If wb Is Nothing Then Set wb = ActiveWorkbook
+    On Error Resume Next
+    Set sht = wb.Sheets(shtName)
+    On Error GoTo 0
+    WorksheetExists = Not sht Is Nothing
+End Function
+
+Function ReplaceInvalidCharacters(s As String) As String
+    Dim invalidChars As Variant
+    Dim i As Integer
+    
+    invalidChars = Array("\", "/", "*", "[", "]", ":", "?")
+    
+    For i = LBound(invalidChars) To UBound(invalidChars)
+        s = Replace(s, invalidChars(i), "_")
+    Next i
+    
+    ReplaceInvalidCharacters = s
+End Function
+
+' Helper function to create a sheet
+Sub CreateSheet(wb As Workbook, shtName As String, rng As Range)
+    Dim parentName As String
+    Dim parentSht As Worksheet
+    Dim newSht As Worksheet
+    
+    parentName = rng.Find(shtName, LookIn:=xlValues, LookAt:=xlWhole).Offset(0, 1).Value
+    
+    If parentName <> "" And Not WorksheetExists(parentName) And IsInList(parentName, rng) Then
+        ' Recursive call to create the parent sheet first
+        CreateSheet wb, parentName, rng
+    End If
+    
+    If WorksheetExists(parentName) Then
+        ' If parent sheet exists, add new sheet after the parent
+        Set parentSht = wb.Sheets(parentName)
+        Set newSht = wb.Sheets.Add(After:=parentSht)
+        newSht.Name = shtName
+    Else
+        ' If parent sheet doesn't exist, add new sheet after the last sheet
+        Set newSht = wb.Sheets.Add(After:=wb.Sheets(wb.Sheets.Count))
+        newSht.Name = shtName
+    End If
+End Sub
+
+' Helper function to check if a value is in a list
+Function IsInList(value As Variant, rng As Range) As Boolean
+    Dim cell As Range
+    For Each cell In rng
+        If cell.Value = value Then
+            IsInList = True
+            Exit Function
+        End If
+    Next cell
+    IsInList = False
+End Function
